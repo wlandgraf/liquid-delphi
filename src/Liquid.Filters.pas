@@ -4,9 +4,10 @@ interface
 
 uses
   System.SysUtils,
-  System.Classes,
+  System.Classes, System.Math,
   System.Generics.Collections,
   System.Rtti, System.TypInfo,
+  System.Character,
 
   Liquid.Interfaces,
   Liquid.Tuples,
@@ -24,6 +25,7 @@ type
     [Weak]
     FContext: ILiquidContext;
     FMethods: TDictionary<string, TClass>;
+    function ResolveMethodName(const MethodName: string): string;
   public
     class procedure GlobalFilter(AClass: TClass);
   public
@@ -52,6 +54,17 @@ type
     function Downcase(const Input: string): string;
     function Append(const Input: string; const Value: string): string;
     function Date(Context: ILiquidContext; const Input: TDateTime; const Format: string): string;
+    function Slice(const Input: string; Start: integer): string; overload;
+    function Slice(const Input: string; Start: integer; Length: integer): string; overload;
+    function Round(const Input: double): double; overload;
+    function Round(const Input: double; Places: integer): double; overload;
+
+    function FormatFloat(Context: ILiquidContext; const Input: integer;
+      const Format: string): string; overload;
+    function FormatFloat(Context: ILiquidContext; const Input: double;
+      const Format: string): string; overload;
+    function FormatFloat(Context: ILiquidContext; const Input: extended;
+      const Format: string): string; overload;
   end;
 
 implementation
@@ -71,6 +84,8 @@ begin
         if Method.IsConstructor then
           Continue;
         if Method.ReturnType = nil then
+          Continue;
+        if FMethods.ContainsKey(Method.Name) and (FMethods[Method.Name] = C.Value) then
           Continue;
         FMethods.Add(Method.Name, C.Value);
       end;
@@ -110,9 +125,11 @@ begin
   try
     for var Method in FMethods do
     begin
-      if Method.Key.ToLower = FilterName.ToLower then
+      if ResolveMethodName(Method.Key) <> ResolveMethodName(FilterName) then
+        Continue;
+      for var RttiMethod in RttiContext.GetType(Method.Value).GetMethods(Method.Key) do
       begin
-        var RttiMethod := RttiContext.GetType(Method.Value).GetMethod(Method.Key);
+        InvokeArgs.Clear;
         if (Length(RttiMethod.GetParameters) > 0) and
           (RttiMethod.GetParameters[0].ParamType.Handle = TypeInfo(ILiquidContext)) then
           InvokeArgs.Add(TValue.From<ILiquidContext>(FContext));
@@ -134,7 +151,7 @@ begin
           var Output := TValue.Empty;
           Output := RttiMethod.Invoke(Instance, InvokeArgs.ToArray);
           if not Output.IsEmpty then
-            Result := Output;
+            Exit(Output);
           Break;
         finally
           Instance.Free;
@@ -145,6 +162,28 @@ begin
     InvokeArgs.Free;
     RttiContext.Free;
   end;
+end;
+
+function TStrainer.ResolveMethodName(const MethodName: string): string;
+var
+  I: Integer;
+  Current, Before: Char;
+begin
+  Result := MethodName;
+  I := 2;
+  while I <= Length(Result) do
+  begin
+    Current := Result[I];
+    Before := Result[I - 1];
+    if Current.IsUpper and (Before <> '_') and Before.IsLower then
+    begin
+      Insert('_', Result, I);
+      Inc(I, 2);
+    end
+    else
+      Inc(I);
+  end;
+  Result := LowerCase(Result);
 end;
 
 { TGenericFilter }
@@ -184,6 +223,60 @@ end;
 function TStandardFilters.Downcase(const Input: string): string;
 begin
   Result := Input.ToLower;
+end;
+
+function TStandardFilters.FormatFloat(Context: ILiquidContext;
+  const Input: double; const Format: string): string;
+begin
+  Result := System.SysUtils.FormatFloat(Format, Input, Context.FormatSettings);
+end;
+
+function TStandardFilters.FormatFloat(Context: ILiquidContext;
+  const Input: extended; const Format: string): string;
+begin
+  Result := System.SysUtils.FormatFloat(Format, Input, Context.FormatSettings);
+end;
+
+function TStandardFilters.FormatFloat(Context: ILiquidContext;
+  const Input: integer; const Format: string): string;
+begin
+  Result := System.SysUtils.FormatFloat(Format, Input, Context.FormatSettings);
+end;
+
+function TStandardFilters.Round(const Input: double; Places: integer): double;
+begin
+  try
+    Result := RoundTo(Input, -1 * Places);
+  except
+    Result := Input;
+  end;
+end;
+
+function TStandardFilters.Round(const Input: double): double;
+begin
+  Result := Round(Input, 0);
+end;
+
+function TStandardFilters.Slice(const Input: string; Start: integer): string;
+begin
+  Result := Slice(Input, Start, 1);
+end;
+
+function TStandardFilters.Slice(const Input: string; Start,
+  Length: integer): string;
+begin
+  if Start < 0 then
+  begin
+    Inc(Start, Input.Length);
+    if Start < 0 then
+    begin
+      Length := Max(0, Length + Start);
+      Start := 0;
+    end;
+  end;
+  if (Start + Length > Input.Length) then
+    Length := Input.Length - Start;
+  Result := Input.Substring(Start, Length);
 end;
 
 function TStandardFilters.Upcase(const Input: string): string;

@@ -89,6 +89,7 @@ type
     procedure IfFromVariable;
     procedure NestedIf;
     procedure ComparisonsOnNull;
+    procedure ComparisonsOnObject;
     procedure ComparisonsOnArray;
     procedure ElseIf;
 
@@ -162,6 +163,11 @@ type
     procedure Downcase;
     procedure Append;
     procedure Date;
+    procedure Slice;
+    procedure Round;
+
+    //
+    procedure FormatFloat;
   end;
 
   Template = class(LiquidBaseTestCase)
@@ -176,6 +182,9 @@ type
     procedure TokenizeStrings;
     procedure TokenizeVariables;
     procedure TokenizeBlocks;
+    procedure ErbLikeTrimmingLeadingWhitespace;
+    procedure ErbLikeTrailingLeadingWhitespace;
+    procedure ErbLikeTrimmingLeadingAndTrailingWhitespace;
 
     procedure InstanceAssignsPersistOnSameTemplateObjectBetweenParses;
   end;
@@ -598,7 +607,7 @@ end;
 procedure Variables.DateTimeVariable;
 begin
   var FormatSettings := TFormatSettings.Invariant;
-  var Context := TLiquidContext.Create(TFormatSettings.Invariant);
+  var Context := TLiquidContext.Create(FormatSettings);
   SetContext(Context);
 
   var Json := '{"published_at":"2013-12-25"}';
@@ -664,6 +673,39 @@ begin
 end;
 
 { Template }
+
+procedure Template.ErbLikeTrailingLeadingWhitespace;
+begin
+  CheckTemplateResult('hi tobi'#13#10, '{% if true -%}'#13#10'hi tobi'#13#10'{% endif %}');
+end;
+
+procedure Template.ErbLikeTrimmingLeadingAndTrailingWhitespace;
+begin
+  var Variables := '{"tasks":["foo", "bar", "baz"]}';
+
+  var Template :=
+    '<ul>' + #13#10 +
+    '{% for item in tasks -%}' + #13#10 +
+    '    {%- if true -%}' + #13#10 +
+    '    <li>{{ item }}</li>' + #13#10 +
+    '    {%- endif -%}' + #13#10 +
+    '{% endfor -%}' + #13#10 +
+    '</ul>';
+
+  var Expected :=
+    '<ul>' + #13#10 +
+    '    <li>foo</li>' + #13#10 +
+    '    <li>bar</li>' + #13#10 +
+    '    <li>baz</li>' + #13#10 +
+    '</ul>';
+
+  CheckTemplateResult(Expected, Template, Variables);
+end;
+
+procedure Template.ErbLikeTrimmingLeadingWhitespace;
+begin
+  CheckTemplateResult('foo'#13#10'hi tobi', 'foo'#13#10#9'  {%- if true %}hi tobi{% endif %}');
+end;
 
 procedure Template.InstanceAssignsPersistOnSameTemplateObjectBetweenParses;
 begin
@@ -1442,9 +1484,9 @@ begin
 
   CheckTemplateResult('NOT EMPTY', Template, Json);
 
-//  Json := '{ "array": [] }';
-//
-//  CheckTemplateResult('EMPTY', Template, Json);
+  Json := '{ "array": [] }';
+
+  CheckTemplateResult('EMPTY', Template, Json);
 end;
 
 procedure _If.ComparisonsOnNull;
@@ -1458,6 +1500,24 @@ begin
   CheckTemplateResult('', '{% if 10 <= null %} NO {% endif %}');
   CheckTemplateResult('', '{% if 10 >= null %} NO {% endif %}');
   CheckTemplateResult('', '{% if 10 > null %} NO {% endif %}');
+end;
+
+procedure _If.ComparisonsOnObject;
+begin
+  CheckTemplateResult(' NO ', '{% if obj %} YES {% else %} NO {% endif %}',
+    '{"obj":null}');
+  CheckTemplateResult(' YES ', '{% if obj %} YES {% else %} NO {% endif %}',
+    '{"obj":{}}');
+
+  CheckTemplateResult(' NO ', '{% if obj.name %} YES {% else %} NO {% endif %}',
+    '{"obj":null}');
+  CheckTemplateResult(' NO ', '{% if obj.name %} YES {% else %} NO {% endif %}',
+    '{"obj":{}}');
+
+  CheckTemplateResult('', '{% if obj.name %} YES {% endif %}',
+    '{"obj":null}');
+  CheckTemplateResult('', '{% if obj.name %} YES {% endif %}',
+    '{"obj":{}}');
 end;
 
 procedure _If.ElseIf;
@@ -1790,24 +1850,24 @@ end;
 
 procedure _For.ForWithVariable;
 begin
-//  CheckTemplateResult(' 1  2  3 ',
-//    '{%for item in array%} {{item}} {%endfor%}',
-//    '{ "array": [ 1, 2, 3 ] }');
-//
-//  CheckTemplateResult('123',
-//    '{%for item in array%}{{item}}{%endfor%}',
-//    '{ "array": [ 1, 2, 3 ] }');
-//
-//  CheckTemplateResult('123',
-//    '{% for item in array %}{{item}}{% endfor %}',
-//    '{ "array": [ 1, 2, 3 ] }');
-//
-//  CheckTemplateResult('abcd',
-//    '{%for item in array%}{{item}}{%endfor%}',
-//    '{ "array": [ "a", "b", "c", "d" ] }');
-//
-//  CheckTemplateResult('a b c', '{%for item in array%}{{item}}{%endfor%}',
-//      '{ "array": [ "a", " ", "b", " ", "c" ] }');
+  CheckTemplateResult(' 1  2  3 ',
+    '{%for item in array%} {{item}} {%endfor%}',
+    '{ "array": [ 1, 2, 3 ] }');
+
+  CheckTemplateResult('123',
+    '{%for item in array%}{{item}}{%endfor%}',
+    '{ "array": [ 1, 2, 3 ] }');
+
+  CheckTemplateResult('123',
+    '{% for item in array %}{{item}}{% endfor %}',
+    '{ "array": [ 1, 2, 3 ] }');
+
+  CheckTemplateResult('abcd',
+    '{%for item in array%}{{item}}{%endfor%}',
+    '{ "array": [ "a", "b", "c", "d" ] }');
+
+  CheckTemplateResult('a b c', '{%for item in array%}{{item}}{%endfor%}',
+      '{ "array": [ "a", " ", "b", " ", "c" ] }');
 
   CheckTemplateResult('abc', '{%for item in array%}{{item}}{%endfor%}',
       '{ "array": [ "a", "", "b", "", "c" ] }');
@@ -2041,6 +2101,47 @@ begin
   CheckTemplateResult('foo', '{{ var1 | downcase }}');
   CheckTemplateResult('bar', '{{ var2 | downcase }}');
   CheckTemplateResult('', '{{ unknown | downcase }}');
+end;
+
+procedure StandardFilters.FormatFloat;
+begin
+  var FormatSettings := TFormatSettings.Invariant;
+  FormatSettings.DecimalSeparator := ',';
+  FormatSettings.ThousandSeparator := '.';
+  var Context := TLiquidContext.Create(FormatSettings);
+  SetContext(Context);
+
+//  CheckTemplateResult('1,23', '{{ 1.234678 | format_float: "#,0.00" }}');
+//  CheckTemplateResult('0,00', '{{ 0 | format_float: "#,0.00" }}');
+//  CheckTemplateResult('0,00', '{{ 0.0 | format_float: "#,0.00" }}');
+  CheckTemplateResult('19,00', '{{ 19 | format_float: "#,0.00" }}');
+//  CheckTemplateResult('123.456,79', '{{ 123456.787 | format_float: "#,0.00" }}');
+end;
+
+procedure StandardFilters.Round;
+begin
+  CheckTemplateResult('1.235', '{{ 1.234678 | round: 3 }}');
+  CheckTemplateResult('4.56', '{{ 4.5612 | round: 2 }}');
+  CheckTemplateResult('5', '{{ 4.6 | round }}');
+  CheckTemplateResult('4', '{{ 4.3 | round }}');
+  CheckTemplateResult('4', '{{ 4 | round }}');
+  CheckTemplateResult('abc', '{{ "abc" | round }}');
+  CheckTemplateResult('true', '{{ true | round }}');
+end;
+
+procedure StandardFilters.Slice;
+begin
+  CheckTemplateResult('', '{{ null | slice: 1 }}');
+  CheckTemplateResult('', '{{ "" | slice: 10 }}');
+
+  CheckTemplateResult('b', '{{ "abcdefg" | slice: 1 }}');
+  CheckTemplateResult('abc', '{{ "abcdefg" | slice: 0, 3 }}');
+  CheckTemplateResult('bcd', '{{ "abcdefg" | slice: 1, 3 }}');
+  CheckTemplateResult('efg', '{{ "abcdefg" | slice: -3, 3 }}');
+  CheckTemplateResult('efg', '{{ "abcdefg" | slice: -3, 30 }}');
+  CheckTemplateResult('efg', '{{ "abcdefg" | slice: 4, 30 }}');
+  CheckTemplateResult('a', '{{ "abc" | slice: -4, 2 }}');
+  CheckTemplateResult('', '{{ "abcdefg" | slice: -10, 1 }}');
 end;
 
 procedure StandardFilters.Upcase;
