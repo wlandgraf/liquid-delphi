@@ -1,4 +1,6 @@
-__history
-/tests/Win32/Debug
-/tests/LiquidTest.dproj.local
-/tests/LiquidTest.identcache
+__history/
+Win32/
+*.local
+*.identcache
+*.~dsk
+*.dsk
